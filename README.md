@@ -1,98 +1,101 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# TP4 – Sesiones de pago y webhook Stripe
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Microservicio HTTP (NestJS) que (1) crea Checkout Sessions de pago en Stripe con una
+API REST y (2) recibe el aviso de Stripe cuando el cobro se concreta (webhook).
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Requisitos
 
-## Description
+- Node.js 20+
+- Una cuenta de Stripe en modo test con clave `sk_test_...`
+- Stripe CLI (solo para probar el webhook en local)
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Configuración
 
-## Project setup
+1. Copiar `.env.template` a `.env`:
 
-```bash
-$ npm install
-```
+   ```bash
+   copy .env.template .env
+   ```
 
-## Compile and run the project
+2. Completar `.env` con tus valores (`.env` NO se versiona; `.env.template` sí).
+
+| Variable                  | Uso                                   |
+| ------------------------- | ------------------------------------- |
+| `PORT`                    | Puerto HTTP (sugerido: `3003`)        |
+| `STRIPE_SECRET`           | Clave secreta de TEST (`sk_test_...`) |
+| `STRIPE_SUCCESS_URL`      | URL de redirect al pagar bien         |
+| `STRIPE_CANCEL_URL`       | URL de redirect al cancelar           |
+| `STRIPE_ENDPOINT_SECRET`  | Signing secret del webhook (`whsec_...`) |
+
+La app **falla al arrancar** si falta alguna de estas variables (fail-fast).
+
+## Levantar
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm install
+npm run start:dev
 ```
 
-## Run tests
+## Rutas
+
+### Entrega 1 – Crear sesión de pago
+
+```
+POST /payments/create-payment-session
+```
+
+Body:
+
+```json
+{
+  "orderId": "ord-1",
+  "currency": "usd",
+  "items": [
+    { "name": "Producto", "price": 20, "quantity": 1 }
+  ]
+}
+```
+
+- `orderId` es obligatorio y viaja en `payment_intent_data.metadata`.
+- Los precios se envían a Stripe en centavos (`Math.round(price * 100)`).
+- Un payload inválido (sin `items`, precio negativo, campos extra) responde `400`.
+- Respuesta: `{ "id": "...", "url": "https://checkout.stripe.com/..." }`.
+
+Redirects de la Checkout Session (valores salen del `.env`, no del body):
+
+```
+GET /payments/success  -> { "ok": true,  "message": "Payment successful" }
+GET /payments/cancel   -> { "ok": false, "message": "Payment cancelled"  }
+```
+
+### Entrega 2 – Webhook
+
+```
+POST /payments/webhook
+```
+
+- Verifica la firma (`stripe-signature`) con `STRIPE_ENDPOINT_SECRET`.
+- Firma inválida/sin firma: `400`, no se procesa.
+- `charge.succeeded`: extrae y loguea `metadata.orderId`.
+- Otros eventos: log de "no manejado" y `200` (Stripe no reintenta).
+
+Para probar en local:
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+stripe listen --forward-to localhost:3003/payments/webhook
 ```
 
-## Deployment
+Usar el `whsec_...` que imprime la CLI como `STRIPE_ENDPOINT_SECRET` y pagar con
+una tarjeta de prueba (https://docs.stripe.com/testing).
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+## Tests y calidad
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+npm test        # tests unitarios (validación del DTO)
+npm run lint    # oxlint
+npm run build   # compila a dist/
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## Fuera de alcance (de la consigna)
 
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Integración con el MS de órdenes, NATS/TCP, reembolsos y modo live de Stripe.
